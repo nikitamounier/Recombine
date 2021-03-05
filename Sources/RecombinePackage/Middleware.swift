@@ -1,6 +1,6 @@
 import Combine
 
-/// A dependency injection structure where you transform raw actions, into refined actions which are sent to the store's `Reducer`.
+/// A dependency injection structure where you transform raw actions into refined actions which are sent to the store's `Reducer`.
 ///
 /// The middleware is where you handle side effects, asynchronous calls, and generally code which interacts with the outside world (ie: making a network call, loading app data from disk, getting the user's current location), and also aggregate operations like resetting the state. Much like the rest of Recombine, `Middleware` harnesses Combine and its publishers to represent these interactions.
 ///
@@ -11,30 +11,30 @@ import Combine
 ///
 /// When creating the middleware, you pass in the `State`, `Input`, and `Output` in the angle brackets, and then a closure which takes two arguments –  a publisher of `State`, the  `Input`, and which returns an `AnyPublisher` of the `Output`.
 ///
-/// Critically, you don't have access to the current state itself – only a "stream" where you can send refined actions.
+/// Critically, you can't modify the state – you have read-only access to it. Since the state is exposed as a `Publisher`, you can `map(_:)` or `flatMap(_:)` into it to read the current `State`.
 ///
 /// Because you need to return an `AnyPublisher`, you usually make your asynchronous calls using Combine publishers, which you can `flatMap(_:)` into the `statePublisher` to return a refined action. It is recommended to make publisher extensions on common types which don't already have one, like `FileManager` or `CLLocationManager`.
 ///
-/// For example, a middleware which handles making a network call and resetting the app's state:
+/// For example, a middleware which handles loading the state from network call and resetting a part of the app's state:
 ///
 ///     static let middleware = Middleware<State, Action.Raw, Action.Refined> { statePublisher, action -> AnyPublisher<Action.Refined, Never> in
 ///         switch action {
-///             case let networkCall(url):
+///             case let loadStateNetworkCall(url):
 ///                 URLSession.shared.dataTaskPublisher(for: url)
 ///                     .map(\.data)
-///                     .decode(type: MyModel.self, decoder: JSONDecoder())
-///                     .replaceError(with: MyModel())
-///                     .flatMap { myModel in
-///                         statePublisher.map { _ in
-///                             return .setModel(myModel)
+///                     .decode(type: State.self, decoder: JSONDecoder())
+///                     .replaceError(with: State())
+///                     .flatMap { newState in
+///                         statePublisher.map { appState in
+///                             return newState != appState ? .setState(appState) : .doNothing
 ///                             }
 ///                      }
 ///                      .eraseToAnyPublisher()
 ///                 }
-///             case resetAppState:
+///             case resetUser:
 ///                 return [
-///                     .setModel(MyModel.empty),
 ///                     .usernameModification(.delete))
+///                     .currentUser(nil)
 ///                     ]
 ///                     .publisher
 ///                     .eraseToAnyPublisher()
@@ -42,7 +42,7 @@ import Combine
 ///     }
 /// In the code above, the network call is made in the form of `URLSession`'s  `dataTaskPublisher(for:)`. We decode the data and change the publisher's error type using `replaceError(with:)` (since the returned `AnyPublisher`'s error type must be `Never` – this can be done with other operators like `catch(:)` and `mapError(_:)`).
 ///
-/// Then, we replace the `URLSession` publisher with the `statePublisher` using `flatMap(_:)`, which itself returns a refined action: `.setModel(MyModel)`.
+/// Then, we replace the `URLSession` publisher with the `statePublisher` using `flatMap(_:)`, where we `map(_:)` into the `statePublisher`. Then, we compare the loaded app state that we just got from the network call and the current app state. If they are different, we set the app state. If not, we do nothing.
 ///
 /// This middleware also handles an aggregate operation, resetting the app state. It simply returns an array of refined actions, which is turned into a publisher using the `publisher` property on the `Sequence` protocol.
 public struct Middleware<State, Input, Output> {
